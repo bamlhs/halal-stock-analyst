@@ -11,9 +11,11 @@ e.g. "meta-llama/Llama-3.1-8B-Instruct" if you have HF access to it.
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Iterator
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TextIteratorStreamer
 
 from .screening import ScreeningResult
 
@@ -70,14 +72,18 @@ class LocalAnalyst:
             lines.append(f"purification_pct_of_dividends: {result.purification_pct:.1%}")
         return "\n".join(lines)
 
-    def answer(self, result: ScreeningResult, question: str) -> str:
+    def stream_answer(self, result: ScreeningResult, question: str) -> Iterator[str]:
+        """Yield the answer token-by-token as it's generated, so a caller
+        (e.g. a streaming HTTP response) can show live progress instead of
+        a blind wait."""
         if not result.is_compliant:
             reasons = "; ".join(result.reasons) or "fails screening"
-            return (
+            yield (
                 f"{result.ticker} ({result.name}) did not pass the Sharia "
                 f"compliance screen: {reasons}. I can't provide an "
                 f"investment discussion for a non-compliant company."
             )
+            return
 
         context = self._context_block(result)
         messages = [
@@ -91,13 +97,19 @@ class LocalAnalyst:
             messages, tokenize=False, add_generation_prompt=True
         )
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
-        output = self.model.generate(
+
+        streamer = TextIteratorStreamer(
+            self.tokenizer, skip_prompt=True, skip_special_tokens=True
+        )
+        generate_kwargs = dict(
             **inputs,
             max_new_tokens=512,
             temperature=0.4,
             do_sample=True,
+            streamer=streamer,
         )
-        text = self.tokenizer.decode(
-            output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
-        )
-        return text.strip()
+        thread = threading.Thread(target=self.model.generate, kwargs=generate_kwargs)
+        thread.start()
+        for chunk in streamer:
+            yield chunk
+        thread.join()

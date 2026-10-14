@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .data import fetch_fundamentals, get_universe_tickers
@@ -69,11 +69,33 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/chat")
-def chat(req: ChatRequest) -> dict:
-    result = get_or_screen(req.ticker)
-    analyst = get_analyst()
-    answer = analyst.answer(result, req.question)
-    return {"ticker": result.ticker, "compliant": result.is_compliant, "answer": answer}
+def chat(req: ChatRequest) -> StreamingResponse:
+    """Streams plain-text progress + the model's answer as it's generated,
+    so the client can show live status instead of a blind spinner. Lines
+    starting with '[status]' are progress markers, not part of the answer.
+    """
+
+    def event_stream():
+        ticker = req.ticker.upper()
+        yield f"[status] Fetching fundamentals for {ticker}...\n"
+        try:
+            result = get_or_screen(ticker)
+        except HTTPException as exc:
+            yield f"[status] Error: {exc.detail}\n"
+            return
+
+        yield f"[status] Sharia screen: {'PASS' if result.is_compliant else 'FAIL'}\n"
+        if not result.is_compliant:
+            yield f"[status] Reasons: {'; '.join(result.reasons)}\n"
+
+        yield "[status] Loading analyst model (first request only, ~1-2 min)...\n"
+        analyst = get_analyst()
+
+        yield "[status] Generating response...\n"
+        for chunk in analyst.stream_answer(result, req.question):
+            yield chunk
+
+    return StreamingResponse(event_stream(), media_type="text/plain")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -91,14 +113,21 @@ def index() -> str:
         async function ask() {
           const ticker = document.getElementById('ticker').value;
           const question = document.getElementById('question').value;
-          document.getElementById('out').textContent = 'Thinking...';
+          const out = document.getElementById('out');
+          out.textContent = '';
           const res = await fetch('/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ticker, question})
           });
-          const data = await res.json();
-          document.getElementById('out').textContent = JSON.stringify(data, null, 2);
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            out.textContent += decoder.decode(value, {stream: true});
+            out.scrollTop = out.scrollHeight;
+          }
         }
       </script>
     </body></html>
