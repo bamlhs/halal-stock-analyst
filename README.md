@@ -4,11 +4,18 @@ A Sharia-compliance stock screener paired with a locally-run, open-source
 LLM chat analyst. Designed to run for free in Google Colab (GPU runtime)
 and be shared via an ngrok tunnel.
 
-> **Disclaimer:** This tool provides an automated approximation of common
-> AAOIFI / Dow Jones Islamic Market style screening criteria. It is **not**
-> a religious ruling (fatwa) and should not be treated as financial advice.
-> Always confirm against a recognized Islamic index (e.g. S&P Shariah,
-> Dow Jones Islamic Market, MSCI Islamic) or a qualified Islamic finance
+> **Disclaimer:** This tool applies **one specific, named screening
+> convention** (see below) — not an official AAOIFI, Dow Jones Islamic
+> Market, S&P Shariah, or MSCI Islamic certification. It is **not** a
+> religious ruling (fatwa) and should not be treated as financial advice.
+> **Different screening services routinely disagree with each other and
+> with this tool** — not because one is "wrong," but because they apply
+> different named standards, different ratio formulas (e.g. debt against
+> market cap vs. debt against total assets), different thresholds, or
+> financial data from a different reporting date. Never treat a single
+> green/red label — from this tool or any other — as confirmed without
+> checking the formula and reporting date behind it. Always confirm
+> against a recognized Islamic index or a qualified Islamic finance
 > scholar before making investment decisions.
 
 ## How the screening works (`src/screening.py`)
@@ -17,17 +24,55 @@ and be shared via an ngrok tunnel.
    or industry is conventional banking/finance, insurance, alcohol,
    tobacco, gambling, pork products, adult entertainment, or conventional
    weapons.
-2. **Financial ratio screens** (relative to market cap):
-   - Debt ratio < 33%
-   - Cash + short-term investments ratio < 33%
-   - Accounts receivable ratio < 49%
-   - Interest/impure income ratio < 5% of revenue — if present, that
-     percentage of dividends should be donated to charity (purification).
+2. **Financial ratio screens**, each measured against **market
+   capitalization** (not total assets — see the caveat below):
+   - Debt ratio: `total_debt / market_cap` < 33%
+   - Liquidity ratio: `(cash_and_equivalents + short_term_investments) / market_cap` < 33%
+   - Receivables ratio: `accounts_receivable / market_cap` < 49%
+   - Impure income ratio: `interest_income / total_revenue` < 5% — if
+     present, that percentage of dividends should be donated to charity
+     (purification). **A $0 purification amount does not by itself mean
+     a stock is compliant** — purification and the pass/fail verdict are
+     two separate calculations; a stock can have $0 purification and
+     still fail on the debt, liquidity, or receivables ratio.
 
-Stock universe defaults to the S&P 500, sourced from the open-source
-[`datasets/s-and-p-500-companies`](https://github.com/datasets/s-and-p-500-companies)
-GitHub repo. Fundamentals come from Yahoo Finance via `yfinance` (free,
-no API key required).
+Fundamentals are pulled from Yahoo Finance's **most recent quarterly**
+balance sheet/income statement where available (falling back to annual
+figures only if no quarterly data exists), via `yfinance` (free, no API
+key required). Stock universe defaults to the S&P 500, sourced from the
+open-source [`datasets/s-and-p-500-companies`](https://github.com/datasets/s-and-p-500-companies)
+GitHub repo.
+
+### Why results can differ from other screening services
+
+"Debt ratio" is not a single, universal number — it depends on three
+independent choices, and each is a legitimate variant used by real
+screening providers:
+
+| Choice | This tool | Also seen elsewhere |
+|---|---|---|
+| Denominator | Market capitalization | Total assets (AAOIFI Standard 21 literal reading) |
+| Numerator | Yahoo Finance "Total Debt" (may include non-interest-bearing items) | Interest-bearing debt only, or total liabilities |
+| Threshold | 33% | 30% (seen on some market-cap-denominator screens) |
+
+A non-permissible-*income* screen (checking revenue sources, not balance
+sheet ratios) is a different check entirely and is **not implemented**
+by this tool.
+
+Because of this, every screening result returned by this tool includes
+five fields so you can audit it against another provider rather than
+trust the headline pass/fail label on its own:
+
+1. **`standard`** — the exact named methodology this tool applies
+2. **`formulas`** — the numerator/denominator for every ratio, with its threshold
+3. **`source_figures`** — the raw financial-statement values used
+4. **`reporting_date` / `reporting_period`** — when those figures were reported, and whether they're quarterly or annual
+5. **`explanation`** — the full calculation and pass/fail verdict for each ratio
+
+The chat analyst (any backend) is instructed to quote all five fields
+before giving a compliance verdict, and to explicitly tell the user that
+other services may disagree for legitimate reasons — see the system
+prompt in `src/prompting.py`.
 
 ## How the analyst works
 

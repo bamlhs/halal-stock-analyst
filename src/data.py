@@ -53,19 +53,33 @@ class CompanyFundamentals:
     accounts_receivable: float
     total_revenue: float
     interest_income: float
+    reporting_date: str
+    reporting_period: str  # "quarterly" or "annual" — which statement the figures came from
+    data_source: str
+    market_price_asof: str  # when market_cap / price was last updated
 
 
 def fetch_fundamentals(ticker: str) -> CompanyFundamentals | None:
     """Pull the fields needed for Sharia financial-ratio screening.
 
-    Yahoo Finance data quality varies by ticker; any missing field is
-    treated as 0 rather than failing the whole fetch.
+    Prefers the most recent *quarterly* balance sheet/income statement —
+    stale annual figures are a common cause of disagreement with other
+    screening services. Yahoo Finance data quality varies by ticker; any
+    missing field is treated as 0 rather than failing the whole fetch.
     """
     try:
         t = yf.Ticker(ticker)
         info = t.info
-        bs = t.balance_sheet
-        fin = t.financials
+
+        bs = t.quarterly_balance_sheet
+        reporting_period = "quarterly"
+        if bs is None or bs.empty:
+            bs = t.balance_sheet
+            reporting_period = "annual"
+
+        fin = t.quarterly_financials
+        if fin is None or fin.empty:
+            fin = t.financials
 
         def bs_val(row: str) -> float:
             if bs is None or bs.empty or row not in bs.index:
@@ -76,6 +90,15 @@ def fetch_fundamentals(ticker: str) -> CompanyFundamentals | None:
             if fin is None or fin.empty or row not in fin.index:
                 return 0.0
             return float(fin.loc[row].iloc[0] or 0.0)
+
+        reporting_date = "unknown"
+        if bs is not None and not bs.empty:
+            reporting_date = str(bs.columns[0].date())
+
+        market_price_asof = "unknown"
+        regular_market_time = info.get("regularMarketTime")
+        if regular_market_time:
+            market_price_asof = str(regular_market_time)
 
         return CompanyFundamentals(
             ticker=ticker,
@@ -89,6 +112,10 @@ def fetch_fundamentals(ticker: str) -> CompanyFundamentals | None:
             accounts_receivable=bs_val("Receivables"),
             total_revenue=fin_val("Total Revenue") or float(info.get("totalRevenue") or 0.0),
             interest_income=fin_val("Interest Income"),
+            reporting_date=reporting_date,
+            reporting_period=reporting_period,
+            data_source="Yahoo Finance (yfinance)",
+            market_price_asof=market_price_asof,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not fetch fundamentals for %s: %s", ticker, exc)
