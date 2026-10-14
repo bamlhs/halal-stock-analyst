@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+pandas
+requests
+yfinance
+torch
+transformers>=4.44
+accelerate
+bitsandbytes
+pyngrok
