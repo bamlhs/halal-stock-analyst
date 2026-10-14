@@ -34,13 +34,15 @@ _analyst: Analyst | None = None
 
 
 def get_analyst() -> Analyst:
-    """Picks the backend based on ANALYST_BACKEND ('local' or 'openai').
+    """Picks the backend based on ANALYST_BACKEND ('local', 'openai', or 'claude').
 
     'local' (default) loads an open-source model into the Colab GPU —
     free, but needs a GPU runtime and a ~1-2 min load on first use.
     'openai' calls the OpenAI API — needs OPENAI_API_KEY (a separate API
     key from platform.openai.com; a ChatGPT Plus/Pro subscription does
     NOT include API access), billed pay-per-token, but no GPU needed.
+    'claude' calls the Anthropic API — needs ANTHROPIC_API_KEY, billed
+    pay-per-token, no GPU needed.
     """
     global _analyst
     if _analyst is None:
@@ -49,6 +51,10 @@ def get_analyst() -> Analyst:
             from .openai_analyst import OpenAIAnalyst
 
             _analyst = OpenAIAnalyst(model=os.environ.get("OPENAI_MODEL", "gpt-4o"))
+        elif backend == "claude":
+            from .claude_analyst import ClaudeAnalyst
+
+            _analyst = ClaudeAnalyst(model=os.environ.get("CLAUDE_MODEL", "claude-opus-4-8"))
         else:
             from .llm_analyst import LocalAnalyst
 
@@ -114,6 +120,8 @@ def chat(req: ChatRequest) -> StreamingResponse:
         backend = os.environ.get("ANALYST_BACKEND", "local").lower()
         if backend == "openai":
             yield "[status] Calling OpenAI API...\n"
+        elif backend == "claude":
+            yield "[status] Calling Claude API...\n"
         else:
             yield "[status] Loading local analyst model (first request only, ~1-2 min)...\n"
         analyst = get_analyst()

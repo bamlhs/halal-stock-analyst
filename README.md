@@ -34,7 +34,7 @@ no API key required).
 The system prompt (`src/prompting.py`) hard-restricts the model to only
 discuss the specific ticker passed in, and only after it has already
 passed the Sharia screen — it will refuse to discuss anything else.
-Two interchangeable backends implement that prompt, selected via the
+Three interchangeable backends implement that prompt, selected via the
 `ANALYST_BACKEND` env var:
 
 - **`local`** (default, `src/llm_analyst.py`) — loads
@@ -48,6 +48,11 @@ Two interchangeable backends implement that prompt, selected via the
   [platform.openai.com](https://platform.openai.com) — **a ChatGPT
   Plus/Pro subscription does not include API access**; API calls are
   billed pay-per-token independently of any chatgpt.com subscription.
+- **`claude`** (`src/claude_analyst.py`) — calls the Anthropic API
+  (`claude-opus-4-8` by default, override with `CLAUDE_MODEL`). Faster,
+  no GPU needed, requires a separate `ANTHROPIC_API_KEY` from
+  [platform.claude.com](https://platform.claude.com), billed
+  pay-per-token against your Anthropic account credit.
 
 ## Running
 
@@ -59,9 +64,10 @@ left sidebar — **never paste the token into a cell**), select a GPU
 runtime, and run all cells. It prints a public ngrok URL you can open
 or share.
 
-To use the OpenAI backend instead of the local model, also add an
-`OPENAI_API_KEY` secret and set `ANALYST_BACKEND = "openai"` in the
-second code cell — no GPU runtime is required in that case.
+To use a hosted API backend instead of the local model, also add the
+matching secret (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`) and set
+`ANALYST_BACKEND` to `"openai"` or `"claude"` in the second code cell —
+no GPU runtime is required for either.
 
 ### Locally
 
@@ -75,6 +81,11 @@ uvicorn src.app:app --reload
 # OR, OpenAI backend:
 export ANALYST_BACKEND=openai
 export OPENAI_API_KEY=your_api_key_here
+uvicorn src.app:app --reload
+
+# OR, Claude backend:
+export ANALYST_BACKEND=claude
+export ANTHROPIC_API_KEY=your_api_key_here
 uvicorn src.app:app --reload
 ```
 
