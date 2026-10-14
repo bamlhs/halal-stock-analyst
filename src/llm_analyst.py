@@ -17,27 +17,12 @@ from collections.abc import Iterator
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TextIteratorStreamer
 
+from .prompting import SYSTEM_PROMPT, context_block, non_compliant_message
 from .screening import ScreeningResult
 
 logger = logging.getLogger(__name__)
 
 MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
-
-SYSTEM_PROMPT = """You are a cautious equity research assistant restricted to \
-Sharia-compliant (halal) investing. You may ONLY discuss and recommend the \
-specific company provided in context, which has already passed an automated \
-AAOIFI-style compliance screen (business activity + debt/liquidity/receivables \
-/ impure-income ratios).
-
-Rules:
-- Never recommend or discuss a company that is not in the provided context.
-- Always mention the purification percentage if impure_income_ratio > 0, and \
-remind the user that fraction of dividends should be donated to charity.
-- Give a balanced view (valuation, momentum, risks) — not financial advice.
-- End every response with: "This is not financial or religious advice. \
-Automated screening approximates common Islamic index methodology; confirm \
-with a qualified scholar or recognized Islamic index before investing."
-"""
 
 
 class LocalAnalyst:
@@ -55,37 +40,15 @@ class LocalAnalyst:
             device_map="auto",
         )
 
-    def _context_block(self, result: ScreeningResult) -> str:
-        lines = [
-            f"ticker: {result.ticker}",
-            f"name: {result.name}",
-            f"sharia_compliant: {result.is_compliant}",
-        ]
-        if result.debt_ratio is not None:
-            lines += [
-                f"debt_ratio: {result.debt_ratio:.1%}",
-                f"liquidity_ratio: {result.liquidity_ratio:.1%}",
-                f"receivables_ratio: {result.receivables_ratio:.1%}",
-                f"impure_income_ratio: {result.impure_income_ratio:.1%}",
-            ]
-        if result.purification_pct:
-            lines.append(f"purification_pct_of_dividends: {result.purification_pct:.1%}")
-        return "\n".join(lines)
-
     def stream_answer(self, result: ScreeningResult, question: str) -> Iterator[str]:
         """Yield the answer token-by-token as it's generated, so a caller
         (e.g. a streaming HTTP response) can show live progress instead of
         a blind wait."""
         if not result.is_compliant:
-            reasons = "; ".join(result.reasons) or "fails screening"
-            yield (
-                f"{result.ticker} ({result.name}) did not pass the Sharia "
-                f"compliance screen: {reasons}. I can't provide an "
-                f"investment discussion for a non-compliant company."
-            )
+            yield non_compliant_message(result)
             return
 
-        context = self._context_block(result)
+        context = context_block(result)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {

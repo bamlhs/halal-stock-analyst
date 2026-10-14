@@ -8,13 +8,14 @@ Run in Colab:  see notebooks/Halal_Stock_Analyst_Colab.ipynb
 from __future__ import annotations
 
 import logging
+import os
+from typing import Protocol
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .data import fetch_fundamentals, get_universe_tickers
-from .llm_analyst import LocalAnalyst
 from .screening import ScreeningResult, screen_company
 
 logging.basicConfig(level=logging.INFO)
@@ -23,13 +24,35 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Halal Stock Analyst")
 
 _screen_cache: dict[str, ScreeningResult] = {}
-_analyst: LocalAnalyst | None = None
 
 
-def get_analyst() -> LocalAnalyst:
+class Analyst(Protocol):
+    def stream_answer(self, result: ScreeningResult, question: str): ...
+
+
+_analyst: Analyst | None = None
+
+
+def get_analyst() -> Analyst:
+    """Picks the backend based on ANALYST_BACKEND ('local' or 'openai').
+
+    'local' (default) loads an open-source model into the Colab GPU —
+    free, but needs a GPU runtime and a ~1-2 min load on first use.
+    'openai' calls the OpenAI API — needs OPENAI_API_KEY (a separate API
+    key from platform.openai.com; a ChatGPT Plus/Pro subscription does
+    NOT include API access), billed pay-per-token, but no GPU needed.
+    """
     global _analyst
     if _analyst is None:
-        _analyst = LocalAnalyst()
+        backend = os.environ.get("ANALYST_BACKEND", "local").lower()
+        if backend == "openai":
+            from .openai_analyst import OpenAIAnalyst
+
+            _analyst = OpenAIAnalyst(model=os.environ.get("OPENAI_MODEL", "gpt-4o"))
+        else:
+            from .llm_analyst import LocalAnalyst
+
+            _analyst = LocalAnalyst()
     return _analyst
 
 
@@ -88,7 +111,11 @@ def chat(req: ChatRequest) -> StreamingResponse:
         if not result.is_compliant:
             yield f"[status] Reasons: {'; '.join(result.reasons)}\n"
 
-        yield "[status] Loading analyst model (first request only, ~1-2 min)...\n"
+        backend = os.environ.get("ANALYST_BACKEND", "local").lower()
+        if backend == "openai":
+            yield "[status] Calling OpenAI API...\n"
+        else:
+            yield "[status] Loading local analyst model (first request only, ~1-2 min)...\n"
         analyst = get_analyst()
 
         yield "[status] Generating response...\n"

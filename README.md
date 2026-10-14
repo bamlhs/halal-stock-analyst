@@ -29,14 +29,25 @@ Stock universe defaults to the S&P 500, sourced from the open-source
 GitHub repo. Fundamentals come from Yahoo Finance via `yfinance` (free,
 no API key required).
 
-## How the analyst works (`src/llm_analyst.py`)
+## How the analyst works
 
-Loads [`Qwen/Qwen2.5-7B-Instruct`](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct)
-(Apache-2.0, open weights) directly into the Colab GPU runtime in 4-bit
-(via `bitsandbytes`), so it fits comfortably on a free-tier T4. The
-system prompt hard-restricts the model to only discuss the specific
-ticker passed in, and only after it has already passed the Sharia
-screen — it will refuse to discuss anything else.
+The system prompt (`src/prompting.py`) hard-restricts the model to only
+discuss the specific ticker passed in, and only after it has already
+passed the Sharia screen — it will refuse to discuss anything else.
+Two interchangeable backends implement that prompt, selected via the
+`ANALYST_BACKEND` env var:
+
+- **`local`** (default, `src/llm_analyst.py`) — loads
+  [`Qwen/Qwen2.5-7B-Instruct`](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct)
+  (Apache-2.0, open weights) directly into the Colab GPU runtime in
+  4-bit (via `bitsandbytes`), fits comfortably on a free-tier T4. Free,
+  but needs a GPU runtime and a ~1-2 min load on first use.
+- **`openai`** (`src/openai_analyst.py`) — calls the OpenAI API
+  (`gpt-4o` by default, override with `OPENAI_MODEL`). Faster, no GPU
+  needed, but requires a separate `OPENAI_API_KEY` from
+  [platform.openai.com](https://platform.openai.com) — **a ChatGPT
+  Plus/Pro subscription does not include API access**; API calls are
+  billed pay-per-token independently of any chatgpt.com subscription.
 
 ## Running
 
@@ -48,11 +59,22 @@ left sidebar — **never paste the token into a cell**), select a GPU
 runtime, and run all cells. It prints a public ngrok URL you can open
 or share.
 
+To use the OpenAI backend instead of the local model, also add an
+`OPENAI_API_KEY` secret and set `ANALYST_BACKEND = "openai"` in the
+second code cell — no GPU runtime is required in that case.
+
 ### Locally
 
 ```bash
 pip install -r requirements.txt
 export NGROK_AUTHTOKEN=your_token_here   # optional, only needed to tunnel
+
+# Local open-source model (default):
+uvicorn src.app:app --reload
+
+# OR, OpenAI backend:
+export ANALYST_BACKEND=openai
+export OPENAI_API_KEY=your_api_key_here
 uvicorn src.app:app --reload
 ```
 

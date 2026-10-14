@@ -9,3 +9,4 @@ transformers>=4.44
 accelerate
 bitsandbytes
 pyngrok
+openai
